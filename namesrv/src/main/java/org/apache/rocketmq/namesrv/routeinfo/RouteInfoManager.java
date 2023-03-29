@@ -761,11 +761,14 @@ public class RouteInfoManager {
         try {
             log.info("start scanNotActiveBroker");
             for (Entry<BrokerAddrInfo, BrokerLiveInfo> next : this.brokerLiveTable.entrySet()) {
+                // 最近更新的一次时间
                 long last = next.getValue().getLastUpdateTimestamp();
+                // 心跳超时的时间
                 long timeoutMillis = next.getValue().getHeartbeatTimeoutMillis();
                 if ((last + timeoutMillis) < System.currentTimeMillis()) {
                     RemotingHelper.closeChannel(next.getValue().getChannel());
                     log.warn("The broker channel expired, {} {}ms", next.getKey(), timeoutMillis);
+                    // 删除channel
                     this.onChannelDestroy(next.getKey());
                 }
             }

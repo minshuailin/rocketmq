@@ -22,6 +22,7 @@ import java.nio.file.Files;
 import java.nio.file.Paths;
 import java.util.Properties;
 import java.util.concurrent.Callable;
+
 import org.apache.commons.cli.CommandLine;
 import org.apache.commons.cli.DefaultParser;
 import org.apache.commons.cli.Option;
@@ -33,6 +34,7 @@ import org.apache.rocketmq.common.constant.LoggerName;
 import org.apache.rocketmq.common.namesrv.NamesrvConfig;
 import org.apache.rocketmq.controller.ControllerManager;
 import org.apache.rocketmq.logging.org.slf4j.Logger;
+import org.apache.rocketmq.remoting.RemotingServer;
 import org.apache.rocketmq.remoting.netty.NettyClientConfig;
 import org.apache.rocketmq.remoting.netty.NettyServerConfig;
 import org.apache.rocketmq.remoting.protocol.RemotingCommand;
@@ -51,14 +53,22 @@ public class NamesrvStartup {
     private static ControllerConfig controllerConfig = null;
 
     public static void main(String[] args) {
+        System.setProperty(MixAll.NAMESRV_ADDR_PROPERTY, "127.0.0.1:9876");
         main0(args);
         controllerManagerMain();
     }
 
+
     public static NamesrvController main0(String[] args) {
         try {
+            // 读取配置 将配置解析成namesrvConfig、nettyServerConfig和nettyClientConfig对象
             parseCommandlineAndConfigFile(args);
+
+            // 创建nameServer的核心控制器
             NamesrvController controller = createAndStartNamesrvController();
+            RemotingServer remotingServer = controller.getRemotingServer();
+            // 自定义钩子函数
+            remotingServer.registerRPCHook(new MyRpcHook());
             return controller;
         } catch (Throwable e) {
             e.printStackTrace();

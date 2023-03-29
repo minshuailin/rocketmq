@@ -25,6 +25,7 @@ import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.ScheduledThreadPoolExecutor;
 import java.util.concurrent.ThreadPoolExecutor;
 import java.util.concurrent.TimeUnit;
+
 import org.apache.commons.lang3.concurrent.BasicThreadFactory;
 import org.apache.rocketmq.common.ThreadFactoryImpl;
 import org.apache.rocketmq.common.constant.LoggerName;
@@ -101,13 +102,27 @@ public class NamesrvController {
     }
 
     public boolean initialize() {
+        // 加载配置
         loadConfig();
+
+        // 初始化nameServer网络组件 可以处理来自 Client 和 Broker 的各种请求
         initiateNetworkComponents();
+
+        // 初始化线程池
         initiateThreadExecutors();
+
+        // 注册请求处理器
         registerProcessor();
+
+        // 启动 nameServer 的定时任务服务
         startScheduleService();
+
+        // 初始化 ssl 上下文
         initiateSslContext();
+
+        // 初始化Rpc钩子函数
         initiateRpcHooks();
+
         return true;
     }
 
@@ -115,12 +130,24 @@ public class NamesrvController {
         this.kvConfigManager.load();
     }
 
+    /**
+     * 定时任务服务的主要是用来：
+     *         1.定期刷新路由信息，将最新的路由信息缓存到本地
+     *         2.定期清理过期的 Topic 配置信息
+     * <p>
+     *    scanNotActiveBroker：来扫描并移除未活跃的 Broker。scanNotActiveBroker 方法会检查所有 Broker 的心跳状态，并将已经离线的 Broker 移除。
+     */
     private void startScheduleService() {
+        // 开启一个定时任务，来定期清理过期的Topic配置信息，比如说topic过期了 被删除了，broker挂掉了 或者被删除了等等
+        // 第一个参数 调用 RouteInfoManager 类中的 scanNotActiveBroker 方法来执行定时任务
+        // 第二个参数 任务首次执行的延迟时间
+        // 第三个参数 任务执行的周期
         this.scanExecutorService.scheduleAtFixedRate(NamesrvController.this.routeInfoManager::scanNotActiveBroker,
-            5, this.namesrvConfig.getScanNotActiveBrokerInterval(), TimeUnit.MILLISECONDS);
+                5, this.namesrvConfig.getScanNotActiveBrokerInterval(), TimeUnit.MILLISECONDS);
 
+        // 用来定期打印当前 NameServer 中的 KV 配置信息 每隔10分钟打印一次
         this.scheduledExecutorService.scheduleAtFixedRate(NamesrvController.this.kvConfigManager::printAllPeriodically,
-            1, 10, TimeUnit.MINUTES);
+                1, 10, TimeUnit.MINUTES);
 
         this.scheduledExecutorService.scheduleAtFixedRate(() -> {
             try {
@@ -137,7 +164,10 @@ public class NamesrvController {
     }
 
     private void initiateThreadExecutors() {
+        // NameServer 默认业务线程池中的任务队列 阻塞队列 容量不限制
         this.defaultThreadPoolQueue = new LinkedBlockingQueue<>(this.namesrvConfig.getDefaultThreadPoolQueueCapacity());
+
+        // 核心线程数16 最大线程数16
         this.defaultExecutor = new ThreadPoolExecutor(this.namesrvConfig.getDefaultThreadPoolNums(), this.namesrvConfig.getDefaultThreadPoolNums(), 1000 * 60, TimeUnit.MILLISECONDS, this.defaultThreadPoolQueue, new ThreadFactoryImpl("RemotingExecutorThread_")) {
             @Override
             protected <T> RunnableFuture<T> newTaskFor(final Runnable runnable, final T value) {
@@ -145,6 +175,7 @@ public class NamesrvController {
             }
         };
 
+        // 处理客户端请求的线程池队列
         this.clientRequestThreadPoolQueue = new LinkedBlockingQueue<>(this.namesrvConfig.getClientRequestThreadPoolQueueCapacity());
         this.clientRequestExecutor = new ThreadPoolExecutor(this.namesrvConfig.getClientRequestThreadPoolNums(), this.namesrvConfig.getClientRequestThreadPoolNums(), 1000 * 60, TimeUnit.MILLISECONDS, this.clientRequestThreadPoolQueue, new ThreadFactoryImpl("ClientRequestExecutorThread_")) {
             @Override
@@ -213,6 +244,11 @@ public class NamesrvController {
         return slowTimeMills;
     }
 
+    /**
+     * 注册请求处理器
+     *  在nameServer中，所有的请求都通过NettyRemotingServer处理器进行处理，因此需要先向 NettyRemotingServer 注册请求处理器
+     *
+     */
     private void registerProcessor() {
         if (namesrvConfig.isClusterTest()) {
 
@@ -239,7 +275,7 @@ public class NamesrvController {
         }
 
         this.remotingClient.updateNameServerAddressList(Collections.singletonList(NetworkUtil.getLocalAddress()
-            + ":" + nettyServerConfig.getListenPort()));
+                + ":" + nettyServerConfig.getListenPort()));
         this.remotingClient.start();
 
         if (this.fileWatchService != null) {
