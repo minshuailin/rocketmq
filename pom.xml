@@ -189,6 +189,7 @@
         <module>controller</module>
         <module>proxy</module>
         <module>tieredstore</module>
+        <module>myRocketMQTest</module>
     </modules>
 
     <build>

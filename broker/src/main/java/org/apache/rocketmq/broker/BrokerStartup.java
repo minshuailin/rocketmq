@@ -47,6 +47,8 @@ public class BrokerStartup {
     public static final SystemConfigFileHelper CONFIG_FILE_HELPER = new SystemConfigFileHelper();
 
     public static void main(String[] args) {
+        System.setProperty(MixAll.ROCKETMQ_HOME_PROPERTY, "/Users/msl/Desktop/learn/rocketmq/mydoc");
+        System.setProperty(MixAll.NAMESRV_ADDR_PROPERTY, "127.0.0.1:9876");
         start(createBrokerController(args));
     }
 
@@ -142,6 +144,7 @@ public class BrokerStartup {
 
         // Set broker role according to ha config
         if (!brokerConfig.isEnableControllerMode()) {
+            // 根据主从配置 设置主从broker
             switch (messageStoreConfig.getBrokerRole()) {
                 case ASYNC_MASTER:
                 case SYNC_MASTER:
@@ -224,6 +227,11 @@ public class BrokerStartup {
         };
     }
 
+    /**
+     * 创建brokerController
+     *
+     * @return
+     */
     public static BrokerController createBrokerController(String[] args) {
         try {
             BrokerController controller = buildBrokerController(args);
