@@ -299,12 +299,16 @@ public class BrokerController {
         this.messageStoreConfig = messageStoreConfig;
         this.setStoreHost(new InetSocketAddress(this.getBrokerConfig().getBrokerIP1(), getListenPort()));
         this.brokerStatsManager = messageStoreConfig.isEnableLmq() ? new LmqBrokerStatsManager(this.brokerConfig.getBrokerClusterName(), this.brokerConfig.isEnableDetailStat()) : new BrokerStatsManager(this.brokerConfig.getBrokerClusterName(), this.brokerConfig.isEnableDetailStat());
+        // 消费者消费进度记录管理类
         this.consumerOffsetManager = messageStoreConfig.isEnableLmq() ? new LmqConsumerOffsetManager(this) : new ConsumerOffsetManager(this);
         this.broadcastOffsetManager = new BroadcastOffsetManager(this);
+        //消息topic维度管理类 管理topic和topic相关的配置
         this.topicConfigManager = messageStoreConfig.isEnableLmq() ? new LmqTopicConfigManager(this) : new TopicConfigManager(this);
         this.topicQueueMappingManager = new TopicQueueMappingManager(this);
+        // 消费者端通过pull的方式向broker拉取消息的处理类
         this.pullMessageProcessor = new PullMessageProcessor(this);
         this.peekMessageProcessor = new PeekMessageProcessor(this);
+        // 消费者端使用push方式的长轮训机制拉取请求
         this.pullRequestHoldService = messageStoreConfig.isEnableLmq() ? new LmqPullRequestHoldService(this) : new PullRequestHoldService(this);
         this.popMessageProcessor = new PopMessageProcessor(this);
         this.notificationProcessor = new NotificationProcessor(this);
@@ -313,7 +317,9 @@ public class BrokerController {
         this.changeInvisibleTimeProcessor = new ChangeInvisibleTimeProcessor(this);
         this.sendMessageProcessor = new SendMessageProcessor(this);
         this.replyMessageProcessor = new ReplyMessageProcessor(this);
+        // 有消息到达Broker时的监听器，回调pullRequestHoldService中的notifyMessageArriving()方法
         this.messageArrivingListener = new NotifyMessageArrivingListener(this.pullRequestHoldService, this.popMessageProcessor, this.notificationProcessor);
+
         this.consumerIdsChangeListener = new DefaultConsumerIdsChangeListener(this);
         this.consumerManager = new ConsumerManager(this.consumerIdsChangeListener, this.brokerStatsManager, this.brokerConfig);
         this.producerManager = new ProducerManager(this.brokerStatsManager);
@@ -682,6 +688,7 @@ public class BrokerController {
 
         initializeBrokerScheduledTasks();
 
+        // 每5秒执行一次 将消息偏移量存储到文件中
         this.scheduledExecutorService.scheduleAtFixedRate(new Runnable() {
             @Override
             public void run() {
@@ -697,6 +704,7 @@ public class BrokerController {
             this.updateNamesrvAddr();
             LOG.info("Set user specified name server address: {}", this.brokerConfig.getNamesrvAddr());
             // also auto update namesrv if specify
+            // 每隔两分钟从name-server 拉取地址服务器最新的配置
             this.scheduledExecutorService.scheduleAtFixedRate(new Runnable() {
                 @Override
                 public void run() {
@@ -730,12 +738,22 @@ public class BrokerController {
         }
     }
 
+    /**
+     * brokerController的初始化
+     *
+     * @return
+     * @throws CloneNotSupportedException
+     */
     public boolean initialize() throws CloneNotSupportedException {
 
+        // 加载topic配置
         boolean result = this.topicConfigManager.load();
         result = result && this.topicQueueMappingManager.load();
+        // 加载不同的消费者消费进度情况
         result = result && this.consumerOffsetManager.load();
+        // 加载订阅关系
         result = result && this.subscriptionGroupManager.load();
+        // 加载消费者过滤的信息配置
         result = result && this.consumerFilterManager.load();
         result = result && this.consumerOrderInfoManager.load();
 
@@ -751,6 +769,8 @@ public class BrokerController {
                 this.brokerStats = new BrokerStats(defaultMessageStore);
                 //load plugin
                 MessageStorePluginContext context = new MessageStorePluginContext(messageStoreConfig, brokerStatsManager, messageArrivingListener, brokerConfig, configuration);
+
+                // 构建消息存储
                 this.messageStore = MessageStoreFactory.build(context, defaultMessageStore);
                 this.messageStore.getDispatcherList().addFirst(new CommitLogDispatcherCalcBitMap(this.brokerConfig, this.consumerFilterManager));
                 if (this.brokerConfig.isEnableControllerMode()) {
@@ -770,6 +790,7 @@ public class BrokerController {
         }
         if (messageStore != null) {
             registerMessageStoreHook();
+            // 加载消息
             result = result && this.messageStore.load();
         }
 
@@ -790,14 +811,18 @@ public class BrokerController {
 
         if (result) {
 
+            // 开启服务端
             initializeRemotingServer();
 
             initializeResources();
 
+            // 注册消息处理器
             registerProcessor();
 
+            // 初始化一些定时任务
             initializeScheduledTasks();
 
+            // 初始化事物
             initialTransaction();
 
             initialAcl();
@@ -968,6 +993,17 @@ public class BrokerController {
         }
     }
 
+    /**
+     * 此方法主要是将这些处理消息的线程执行器注册到NettyRemotingServer，
+     *  在NettyRemotingServer中有一个 processorTable（map）存放这这些线程处理器
+     *  key:对应的RequestCode  value:对应的线程处理器  根据对应的requestCode找到对应的线程处理器
+     *  线程处理器:
+     *      sendMessageProcessor：发送消息
+     *      pullMessageExecutor：拉取消息
+     *      queryMessageExecutor：查询消息
+     *      adminBrokerExecutor：默认处理
+     *
+     */
     public void registerProcessor() {
         /*
          * SendMessageProcessor

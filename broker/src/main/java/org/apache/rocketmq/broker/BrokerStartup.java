@@ -87,9 +87,12 @@ public class BrokerStartup {
         final BrokerConfig brokerConfig = new BrokerConfig();
         final NettyServerConfig nettyServerConfig = new NettyServerConfig();
         final NettyClientConfig nettyClientConfig = new NettyClientConfig();
+
+        // broker消息配置类
         final MessageStoreConfig messageStoreConfig = new MessageStoreConfig();
         nettyServerConfig.setListenPort(10911);
 
+        // 这一块主要是读取一些broker的配置参数等信息
         Options options = ServerUtil.buildCommandlineOptions(new Options());
         CommandLine commandLine = ServerUtil.parseCmdLine(
             "mqbroker", args, buildCommandlineOptions(options), new DefaultParser());
@@ -122,7 +125,7 @@ public class BrokerStartup {
             System.exit(-2);
         }
 
-        // Validate namesrvAddr
+        // Validate namesrvAddr 校验nameServer的地址有效性
         String namesrvAddr = brokerConfig.getNamesrvAddr();
         if (StringUtils.isNotBlank(namesrvAddr)) {
             try {
@@ -137,8 +140,10 @@ public class BrokerStartup {
             }
         }
 
+        // 如果slave时，修改命中消息在内存的最大比例
         if (BrokerRole.SLAVE == messageStoreConfig.getBrokerRole()) {
             int ratio = messageStoreConfig.getAccessMessageInMemoryMaxRatio() - 10;
+            // slave broker命中消息在内存的最大比例是30
             messageStoreConfig.setAccessMessageInMemoryMaxRatio(ratio);
         }
 
@@ -146,11 +151,13 @@ public class BrokerStartup {
         if (!brokerConfig.isEnableControllerMode()) {
             // 根据主从配置 设置主从broker
             switch (messageStoreConfig.getBrokerRole()) {
+                // master broker的brokerId为0
                 case ASYNC_MASTER:
                 case SYNC_MASTER:
                     brokerConfig.setBrokerId(MixAll.MASTER_ID);
                     break;
                 case SLAVE:
+                    // slave的brokerId必须大于0
                     if (brokerConfig.getBrokerId() <= MixAll.MASTER_ID) {
                         System.out.printf("Slave's brokerId must be > 0%n");
                         System.exit(-3);
@@ -161,13 +168,18 @@ public class BrokerStartup {
             }
         }
 
+        // TODO 暂定 不采用主从复制模式，采用的是多副本的Raft协议支持的集群模式
         if (messageStoreConfig.isEnableDLegerCommitLog()) {
             brokerConfig.setBrokerId(-1);
         }
+
+        // 设置HA 监听端口
         messageStoreConfig.setHaListenPort(nettyServerConfig.getListenPort() + 1);
         brokerConfig.setInBrokerContainer(false);
 
         System.setProperty("brokerLogDir", "");
+
+        // 日志相关
         if (brokerConfig.isIsolateLogEnable()) {
             System.setProperty("brokerLogDir", brokerConfig.getBrokerName() + "_" + brokerConfig.getBrokerId());
         }
@@ -197,6 +209,7 @@ public class BrokerStartup {
         MixAll.printObjectProperties(log, nettyClientConfig);
         MixAll.printObjectProperties(log, messageStoreConfig);
 
+        // 基于上面配置，创建brokerController
         final BrokerController controller = new BrokerController(
             brokerConfig, nettyServerConfig, nettyClientConfig, messageStoreConfig);
 
@@ -235,6 +248,7 @@ public class BrokerStartup {
     public static BrokerController createBrokerController(String[] args) {
         try {
             BrokerController controller = buildBrokerController(args);
+            // 初始化brokerController
             boolean initResult = controller.initialize();
             if (!initResult) {
                 controller.shutdown();
